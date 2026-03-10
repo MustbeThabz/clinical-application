@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: clinical_app
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - agent_pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+
+  agent_service:
+    build:
+      context: ./agent_service
+    env_file:
+      - .env
+    environment:
+      APP_ENV: development
+      APP_PORT: 8010
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/clinical_app
+      REDIS_URL: redis://redis:6379/0
+      BACKEND_STORE: ${BACKEND_STORE}
+      ALLOW_HEADER_AUTH: ${ALLOW_HEADER_AUTH}
+      AGENT_SERVICE_URL: ${AGENT_SERVICE_URL}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID}
+      WHATSAPP_BUSINESS_ACCOUNT_ID: ${WHATSAPP_BUSINESS_ACCOUNT_ID}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN}
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8010:8010"
+
+volumes:
+  agent_pgdata:

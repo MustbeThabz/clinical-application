@@ -1,0 +1,15 @@
+{
+  "users": [
+    {
+      "id": "742ffdfa-ecce-48e4-a1d5-722bc153e6cd",
+      "email": "admin@clinic.local",
+      "name": "Clinic Admin",
+      "role": "clinic_admin",
+      "passwordHash": "scrypt$3802e527ef7c912e35b604f1064060e5$5236047f46f28accfbeada532844eb85b70baf5d52a670e59925d7f0704edbafa32afe7f10abfc4b38b8ba9767eb7ad06926e6bdf75a08ed83e45f8b13b7a02a",
+      "isActive": true,
+      "createdAt": "2026-02-13T07:32:43.839Z",
+      "updatedAt": "2026-02-13T07:32:43.839Z"
+    }
+  ],
+  "passwordResets": []
+}
