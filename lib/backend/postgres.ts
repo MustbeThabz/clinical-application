@@ -19,6 +19,15 @@ function psqlArgs(sql: string) {
   return args
 }
 
+function dockerPsqlArgs(sql: string) {
+  const composeFile = process.env.POSTGRES_DOCKER_COMPOSE_FILE || "docker-compose.agent.yml"
+  const service = process.env.POSTGRES_DOCKER_SERVICE || "postgres"
+  const db = process.env.POSTGRES_DOCKER_DB || "clinical_app"
+  const user = process.env.POSTGRES_DOCKER_USER || "postgres"
+
+  return ["compose", "-f", composeFile, "exec", "-T", service, "psql", "-U", user, "-d", db, "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql]
+}
+
 export function postgresEnabled() {
   return process.env.BACKEND_STORE === "postgres"
 }
@@ -29,11 +38,32 @@ export function sqlString(value: string | undefined | null) {
 }
 
 export async function runSql(sql: string) {
-  const { stdout } = await execFileAsync("psql", psqlArgs(sql), {
-    env: process.env,
-    maxBuffer: 1024 * 1024 * 10,
-  })
-  return stdout.trim()
+  const useDockerPsql = process.env.POSTGRES_PSQL_MODE === "docker"
+
+  try {
+    const { stdout } = await execFileAsync(useDockerPsql ? "docker" : "psql", useDockerPsql ? dockerPsqlArgs(sql) : psqlArgs(sql), {
+      env: process.env,
+      cwd: process.cwd(),
+      maxBuffer: 1024 * 1024 * 10,
+    })
+    return stdout.trim()
+  } catch (error) {
+    if (useDockerPsql) {
+      throw error
+    }
+
+    const err = error as NodeJS.ErrnoException
+    if (err.code !== "ENOENT") {
+      throw error
+    }
+
+    const { stdout } = await execFileAsync("docker", dockerPsqlArgs(sql), {
+      env: process.env,
+      cwd: process.cwd(),
+      maxBuffer: 1024 * 1024 * 10,
+    })
+    return stdout.trim()
+  }
 }
 
 export async function runSqlJson<T>(sql: string, defaultValue: T): Promise<T> {

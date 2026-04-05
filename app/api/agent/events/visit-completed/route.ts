@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/backend/auth"
 export const runtime = "nodejs"
 
 export async function POST(request: Request) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff"])
+  const auth = await requireRole(request, ["clinic_admin", "nurse", "doctor"])
   if (!auth.ok) return auth.response
 
   const baseUrl = process.env.AGENT_SERVICE_URL

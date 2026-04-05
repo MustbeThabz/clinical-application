@@ -1,129 +1,123 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
-  ArrowRight,
   Bot,
   CheckCircle2,
-  Eye,
+  Clock,
   Lightbulb,
   MessageSquare,
-  Pause,
   Phone,
-  Play,
   RefreshCw,
-  Settings,
+  Shield,
   Target,
   TrendingUp,
-  XCircle,
   Zap,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
 
-const agentGoals = [
-  { id: 1, goal: "Safely Re-engage Patient", active: true, successRate: 87 },
-  { id: 2, goal: "Medication Adherence Monitoring", active: true, successRate: 92 },
-  { id: 3, goal: "Appointment Confirmation", active: true, successRate: 95 },
-  { id: 4, goal: "Risk Assessment Updates", active: false, successRate: 78 },
-]
+type ReminderStageMetric = {
+  stage: string
+  label: string
+  count: number
+  status: string
+}
 
-const agentSteps = [
-  { step: "Identify", description: "Detect missed appointments or lab delays", icon: Eye },
-  { step: "Assess", description: "Evaluate clinical risk based on history", icon: TrendingUp },
-  { step: "Prioritize", description: "Rank patients based on urgency", icon: Target },
-  { step: "Trigger", description: "Execute follow-up actions (SMS, calls)", icon: Zap },
-  { step: "Escalate", description: "Hand off high-risk cases to clinicians", icon: AlertTriangle },
-]
+type AgentAction = {
+  id: string
+  patient: string
+  patientId: string
+  action: string
+  reason: string
+  time: string
+  status: string
+  type: string
+  occurredAt: string
+}
 
-const recentActions = [
-  {
-    id: 1,
-    patient: "John Doe",
-    patientId: "P-1024",
-    action: "Escalated to Nurse",
-    reason: "High risk score (0.92) + No response to 2 SMS",
-    time: "2 min ago",
-    status: "completed",
-    type: "escalation",
-  },
-  {
-    id: 2,
-    patient: "Maria Santos",
-    patientId: "P-2156",
-    action: "Voice Call Triggered",
-    reason: "No response to SMS after 24hrs",
-    time: "15 min ago",
-    status: "in-progress",
-    type: "call",
-  },
-  {
-    id: 3,
-    patient: "Robert Chen",
-    patientId: "P-3891",
-    action: "SMS Reminder Sent",
-    reason: "Missed appointment - First offense",
-    time: "32 min ago",
-    status: "completed",
-    type: "sms",
-  },
-  {
-    id: 4,
-    patient: "Emily Watson",
-    patientId: "P-4521",
-    action: "Goal Achieved",
-    reason: "Patient responded and rescheduled",
-    time: "1 hr ago",
-    status: "success",
-    type: "success",
-  },
-]
+type AgentObjective = {
+  id: string
+  goal: string
+  active: boolean
+  count: number
+}
 
-const perceptionLoop = [
-  { phase: "Goal", description: "Re-engage Patient", active: false },
-  { phase: "Interpret", description: "Parse health record signals", active: false },
-  { phase: "Plan", description: "Select intervention strategy", active: true },
-  { phase: "Act", description: "Execute follow-up action", active: false },
-  { phase: "Observe", description: "Monitor for response", active: false },
-  { phase: "Re-plan", description: "Adapt if needed", active: false },
-]
+type AIAgentOverview = {
+  status: {
+    running: boolean
+    lastUpdatedAt: string
+    currentPhase: string
+  }
+  summary: {
+    actionsToday: number
+    confirmationsToday: number
+    activeLoops: number
+    escalationsToday: number
+    successRate: number
+  }
+  reminderMetrics: {
+    whatsappMessagesToday: number
+    patientCallsToday: number
+    nextOfKinCallsToday: number
+    dayOfRemindersToday: number
+    homeVisitEscalationsToday: number
+    activeWorkflows: number
+    pendingByStage: ReminderStageMetric[]
+  }
+  recentActions: AgentAction[]
+  objectives: AgentObjective[]
+}
+
+function formatClinicTime(value?: string) {
+  if (!value) return "--:--"
+  return new Intl.DateTimeFormat("en-ZA", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "Africa/Johannesburg",
+  }).format(new Date(value))
+}
 
 const governanceTiers = [
   {
     tier: 1,
     name: "Autonomous AI",
-    description: "Routine reminders, scheduling, low-risk admin",
+    description: "WhatsApp reminders, booking proposals, and low-risk scheduling support.",
     color: "bg-success/20 text-success",
   },
   {
     tier: 2,
     name: "AI + Human Oversight",
-    description: "Ambiguous cases. AI proposes -> Human approves",
+    description: "Call escalations and workflow queues handed to clinic teams for action.",
     color: "bg-warning/20 text-warning",
   },
   {
     tier: 3,
-    name: "Human Only",
-    description: "High-risk, complex clinical judgment",
+    name: "Human Escalation",
+    description: "Home-care and nurse follow-up when digital outreach is unsuccessful.",
     color: "bg-destructive/20 text-destructive",
   },
 ]
 
+const loopPhases = ["Goal", "Plan", "Act", "Observe", "Escalate"]
+
 function getActionIcon(type: string) {
   switch (type) {
+    case "whatsapp":
+      return <MessageSquare className="w-4 h-4 text-primary" />
+    case "call":
+      return <Phone className="w-4 h-4 text-warning" />
     case "escalation":
       return <AlertTriangle className="w-4 h-4 text-destructive" />
-    case "call":
-      return <Phone className="w-4 h-4 text-primary" />
-    case "sms":
-      return <MessageSquare className="w-4 h-4 text-accent" />
     case "success":
       return <CheckCircle2 className="w-4 h-4 text-success" />
+    case "booking":
+      return <Target className="w-4 h-4 text-accent" />
     default:
       return <Bot className="w-4 h-4 text-muted-foreground" />
   }
@@ -131,261 +125,300 @@ function getActionIcon(type: string) {
 
 function getStatusBadge(status: string) {
   switch (status) {
-    case "completed":
-      return <Badge variant="secondary">Completed</Badge>
-    case "in-progress":
-      return <Badge className="bg-primary/20 text-primary">In Progress</Badge>
     case "success":
       return <Badge className="bg-success/20 text-success">Success</Badge>
+    case "in_progress":
+      return <Badge className="bg-primary/20 text-primary">In Progress</Badge>
+    case "completed":
+      return <Badge variant="secondary">Completed</Badge>
     default:
       return <Badge variant="outline">{status}</Badge>
   }
 }
 
 export function AIAgentView() {
-  const [isAgentRunning, setIsAgentRunning] = useState(true)
+  const [overview, setOverview] = useState<AIAgentOverview>({
+    status: {
+      running: true,
+      lastUpdatedAt: "",
+      currentPhase: "Plan",
+    },
+    summary: {
+      actionsToday: 0,
+      confirmationsToday: 0,
+      activeLoops: 0,
+      escalationsToday: 0,
+      successRate: 0,
+    },
+    reminderMetrics: {
+      whatsappMessagesToday: 0,
+      patientCallsToday: 0,
+      nextOfKinCallsToday: 0,
+      dayOfRemindersToday: 0,
+      homeVisitEscalationsToday: 0,
+      activeWorkflows: 0,
+      pendingByStage: [],
+    },
+    recentActions: [],
+    objectives: [],
+  })
+  const [loading, setLoading] = useState(true)
+
+  const loadOverview = async () => {
+    try {
+      const response = await fetch("/api/ai-agent/overview", { cache: "no-store" })
+      if (!response.ok) return
+      const result = (await response.json()) as { data?: AIAgentOverview }
+      if (result.data) {
+        setOverview(result.data)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadOverview()
+    const interval = window.setInterval(() => {
+      void loadOverview()
+    }, 15000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  const statCards = [
+    {
+      title: "Actions Today",
+      value: overview.summary.actionsToday,
+      description: "Live agent actions recorded today",
+      icon: Bot,
+      tone: "text-primary bg-primary/10",
+    },
+    {
+      title: "Confirmed Today",
+      value: overview.summary.confirmationsToday,
+      description: `${overview.summary.successRate}% success rate`,
+      icon: CheckCircle2,
+      tone: "text-success bg-success/10",
+    },
+    {
+      title: "Active Loops",
+      value: overview.summary.activeLoops,
+      description: "Reminder workflows currently in motion",
+      icon: RefreshCw,
+      tone: "text-warning bg-warning/10",
+    },
+    {
+      title: "Escalations Today",
+      value: overview.summary.escalationsToday,
+      description: "Calls and home-care escalations",
+      icon: AlertTriangle,
+      tone: "text-destructive bg-destructive/10",
+    },
+  ]
+
+  const channelActivity = [
+    { label: "WhatsApp Messages", value: overview.reminderMetrics.whatsappMessagesToday, icon: MessageSquare },
+    { label: "Patient Calls", value: overview.reminderMetrics.patientCallsToday, icon: Phone },
+    { label: "Next-of-Kin Calls", value: overview.reminderMetrics.nextOfKinCallsToday, icon: Clock },
+    { label: "Day-of Reminders", value: overview.reminderMetrics.dayOfRemindersToday, icon: CheckCircle2 },
+    { label: "Home-Care Escalations", value: overview.reminderMetrics.homeVisitEscalationsToday, icon: AlertTriangle },
+  ]
+
+  const currentPhase = useMemo(() => overview.status.currentPhase.toLowerCase(), [overview.status.currentPhase])
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">AI Clinical Agent</h1>
-          <p className="text-muted-foreground">
-            Goal-driven agentic AI for patient re-engagement and clinical support
-          </p>
+          <p className="text-muted-foreground">Live operational view of WhatsApp outreach, confirmations, calls, and escalations.</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Label htmlFor="agent-toggle" className="text-sm">
-              Agent Status
-            </Label>
-            <Switch
-              id="agent-toggle"
-              checked={isAgentRunning}
-              onCheckedChange={setIsAgentRunning}
-            />
-          </div>
-          <Badge className={isAgentRunning ? "bg-success text-success-foreground" : "bg-muted"}>
-            {isAgentRunning ? "Running" : "Paused"}
+          <Badge className={overview.status.running ? "bg-success text-success-foreground" : "bg-muted"}>
+            {overview.status.running ? "Live" : "Offline"}
           </Badge>
+          <Button variant="outline" onClick={() => void loadOverview()}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
         </div>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Bot className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">156</p>
-                <p className="text-xs text-muted-foreground">Actions Today</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-success/10">
-                <CheckCircle2 className="w-5 h-5 text-success" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">89%</p>
-                <p className="text-xs text-muted-foreground">Success Rate</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-warning/10">
-                <RefreshCw className="w-5 h-5 text-warning" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">23</p>
-                <p className="text-xs text-muted-foreground">Active Loops</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-destructive/10">
-                <AlertTriangle className="w-5 h-5 text-destructive" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">7</p>
-                <p className="text-xs text-muted-foreground">Escalations</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Goal Decomposition */}
-          <Card className="border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg">Agent Goal Decomposition</CardTitle>
-              <CardDescription>
-                Automated decomposition ensures no step in the re-engagement process is skipped
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between overflow-x-auto pb-2">
-                {agentSteps.map((step, index) => (
-                  <div key={step.step} className="flex items-center">
-                    <div className="flex flex-col items-center min-w-[100px]">
-                      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-2">
-                        <step.icon className="w-5 h-5 text-primary" />
-                      </div>
-                      <span className="text-sm font-medium">{step.step}</span>
-                      <span className="text-[10px] text-muted-foreground text-center mt-1 max-w-[90px]">
-                        {step.description}
-                      </span>
-                    </div>
-                    {index < agentSteps.length - 1 && (
-                      <ArrowRight className="w-4 h-4 text-muted-foreground mx-1" />
-                    )}
-                  </div>
-                ))}
+        {statCards.map((item) => (
+          <Card key={item.title} className="border-0 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`rounded-lg p-2 ${item.tone.split(" ")[1]}`}>
+                  <item.icon className={`w-5 h-5 ${item.tone.split(" ")[0]}`} />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{item.value}</p>
+                  <p className="text-xs font-medium text-foreground">{item.title}</p>
+                  <p className="text-xs text-muted-foreground">{item.description}</p>
+                </div>
               </div>
             </CardContent>
           </Card>
+        ))}
+      </div>
 
-          {/* Recent Agent Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <Card className="border-0 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-lg">Live Workflow Pipeline</CardTitle>
+              <CardDescription>Current reminder and escalation stages being handled by the agent.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {overview.reminderMetrics.pendingByStage.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                  No active reminder workflows at the moment.
+                </div>
+              ) : (
+                overview.reminderMetrics.pendingByStage.map((stage) => (
+                  <div key={stage.stage} className="rounded-lg border bg-secondary/20 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium">{stage.label}</p>
+                        <p className="text-xs text-muted-foreground">{stage.status.replaceAll("_", " ")}</p>
+                      </div>
+                      <Badge variant="secondary">{stage.count} active</Badge>
+                    </div>
+                    <Progress value={Math.min(100, stage.count * 10)} className="mt-3 h-2" />
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
           <Card className="border-0 shadow-sm">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-lg">Recent Agent Actions</CardTitle>
-                  <CardDescription>Real-time log of AI agent activities</CardDescription>
+                  <CardDescription>Live activity from WhatsApp, call, confirmation, and escalation workflows.</CardDescription>
                 </div>
                 <Badge variant="outline" className="font-normal">
                   <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
-                  Live
+                  Polling
                 </Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {recentActions.map((action) => (
-                <div
-                  key={action.id}
-                  className="flex items-start gap-4 p-4 rounded-lg bg-secondary/30 hover:bg-secondary/50 transition-colors"
-                >
-                  <div className="p-2 rounded-lg bg-background">
-                    {getActionIcon(action.type)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium">{action.patient}</span>
-                      <span className="text-xs text-muted-foreground">{action.patientId}</span>
-                      {getStatusBadge(action.status)}
-                    </div>
-                    <p className="text-sm font-medium text-primary">{action.action}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{action.reason}</p>
-                  </div>
-                  <span className="text-xs text-muted-foreground shrink-0">{action.time}</span>
+              {overview.recentActions.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                  No recent agent actions have been recorded yet.
                 </div>
-              ))}
+              ) : (
+                overview.recentActions.map((action) => (
+                  <div key={action.id} className="flex items-start gap-4 rounded-lg bg-secondary/30 p-4">
+                    <div className="rounded-lg bg-background p-2">{getActionIcon(action.type)}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="font-medium">{action.patient}</span>
+                        <span className="text-xs text-muted-foreground">{action.patientId}</span>
+                        {getStatusBadge(action.status)}
+                      </div>
+                      <p className="text-sm font-medium text-primary">{action.action}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{action.reason}</p>
+                    </div>
+                    <span className="shrink-0 text-xs text-muted-foreground">{action.time}</span>
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Sidebar */}
         <div className="space-y-6">
-          {/* Perception-Action Loop */}
           <Card className="border-0 shadow-sm">
             <CardHeader>
               <CardTitle className="text-lg">Perception-Action Loop</CardTitle>
-              <CardDescription>Iterative cycle until goal is achieved</CardDescription>
+              <CardDescription>Current operating phase based on active workflows.</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="relative">
-                <div className="grid grid-cols-3 gap-2">
-                  {perceptionLoop.map((phase, index) => (
-                    <div
-                      key={phase.phase}
-                      className={`p-3 rounded-lg text-center ${
-                        phase.active
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-secondary/50"
-                      }`}
-                    >
-                      <p className="text-xs font-medium">{phase.phase}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex justify-center mt-3">
-                  <RefreshCw className="w-5 h-5 text-primary animate-spin" />
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                {loopPhases.map((phase) => (
+                  <div
+                    key={phase}
+                    className={`rounded-lg p-3 text-center text-sm font-medium ${
+                      currentPhase === phase.toLowerCase() ? "bg-primary text-primary-foreground" : "bg-secondary/50"
+                    }`}
+                  >
+                    {phase}
+                  </div>
+                ))}
               </div>
+              <p className="mt-4 text-xs text-muted-foreground">
+                Last synced {formatClinicTime(overview.status.lastUpdatedAt)}.
+              </p>
             </CardContent>
           </Card>
 
-          {/* Active Goals */}
           <Card className="border-0 shadow-sm">
             <CardHeader>
-              <CardTitle className="text-lg">Active Goals</CardTitle>
-              <CardDescription>Configure agent objectives</CardDescription>
+              <CardTitle className="text-lg">Channel Activity</CardTitle>
+              <CardDescription>Today&apos;s live activity across messaging and call channels.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {agentGoals.map((goal) => (
-                <div
-                  key={goal.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-secondary/30"
-                >
+              {channelActivity.map((item) => (
+                <div key={item.label} className="flex items-center justify-between rounded-lg bg-secondary/30 p-3">
                   <div className="flex items-center gap-3">
-                    <Switch checked={goal.active} />
-                    <div>
-                      <p className="text-sm font-medium">{goal.goal}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {goal.successRate}% success rate
-                      </p>
-                    </div>
+                    <item.icon className="w-4 h-4 text-primary" />
+                    <span className="text-sm">{item.label}</span>
                   </div>
+                  <span className="text-lg font-semibold">{item.value}</span>
                 </div>
               ))}
             </CardContent>
           </Card>
 
-          {/* Governance Tiers */}
+          <Card className="border-0 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-lg">Automation Objectives</CardTitle>
+              <CardDescription>What the clinical agent is actively handling right now.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {overview.objectives.map((goal) => (
+                <div key={goal.id} className="flex items-center justify-between rounded-lg bg-secondary/30 p-3">
+                  <div>
+                    <p className="text-sm font-medium">{goal.goal}</p>
+                    <p className="text-xs text-muted-foreground">{goal.active ? "Active" : "Paused"}</p>
+                  </div>
+                  <Badge variant="secondary">{goal.count}</Badge>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
           <Card className="border-0 shadow-sm">
             <CardHeader>
               <CardTitle className="text-lg">Governance Model</CardTitle>
-              <CardDescription>Human-in-the-loop tiered escalation</CardDescription>
+              <CardDescription>Human oversight boundaries for the clinical agent.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {governanceTiers.map((tier) => (
-                <div key={tier.tier} className={`p-3 rounded-lg ${tier.color}`}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-bold">Tier {tier.tier}</span>
+                <div key={tier.tier} className={`rounded-lg p-3 ${tier.color}`}>
+                  <div className="mb-1 flex items-center gap-2">
+                    <Shield className="w-4 h-4" />
                     <span className="text-sm font-medium">{tier.name}</span>
                   </div>
-                  <p className="text-xs opacity-80">{tier.description}</p>
+                  <p className="text-xs opacity-90">{tier.description}</p>
                 </div>
               ))}
             </CardContent>
           </Card>
 
-          {/* Key Insight */}
-          <Card className="border-0 shadow-sm border-l-4 border-l-primary">
+          <Card className="border-0 border-l-4 border-l-primary shadow-sm">
             <CardContent className="p-4">
               <div className="flex items-start gap-3">
-                <Lightbulb className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <Lightbulb className="mt-0.5 w-5 h-5 shrink-0 text-primary" />
                 <div>
-                  <p className="text-sm font-medium mb-1">Key Distinction</p>
+                  <p className="mb-1 text-sm font-medium">What This Page Is For</p>
                   <p className="text-xs text-muted-foreground">
-                    This is an AI worker, not a chatbot. It continuously supports clinical teams
-                    while respecting safety and accountability.
+                    This is the live operations console for the clinic agent. It shows what the automation is doing now,
+                    where patients are in the reminder flow, and when a human team needs to step in.
                   </p>
                 </div>
               </div>

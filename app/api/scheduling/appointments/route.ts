@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createAppointment, listAppointmentsForDate } from "@/lib/backend/db"
+import { createAppointment, listAppointmentsForDate, listAppointmentsForRange, writeAuditLogSafe } from "@/lib/backend/db"
 import { requireRole } from "@/lib/backend/auth"
 
 export const runtime = "nodejs"
@@ -32,17 +32,31 @@ async function emitAppointmentScheduledEvent(payload: {
 }
 
 export async function GET(request: Request) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff", "lab_pharmacy"])
+  const auth = await requireRole(request, [
+    "clinic_admin",
+    "receptionist_admin",
+    "research_assistant",
+    "nurse",
+    "doctor",
+    "lab_personnel",
+    "pharmacist",
+  ])
   if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(request.url)
+  const start = searchParams.get("start")
+  const end = searchParams.get("end")
+  if (start && end) {
+    const data = await listAppointmentsForRange(start, end)
+    return NextResponse.json({ data, count: data.length, start, end })
+  }
   const date = searchParams.get("date") ?? new Date().toISOString().slice(0, 10)
   const data = await listAppointmentsForDate(date)
   return NextResponse.json({ data, count: data.length, date })
 }
 
 export async function POST(request: Request) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff"])
+  const auth = await requireRole(request, ["clinic_admin", "receptionist_admin", "nurse", "doctor"])
   if (!auth.ok) return auth.response
 
   try {
@@ -58,6 +72,12 @@ export async function POST(request: Request) {
     }
 
     const created = await createAppointment(body)
+    await writeAuditLogSafe({
+      entityType: "appointment",
+      entityId: String(created.id),
+      action: `rbac_appointment_create:${auth.context.role}`,
+      actorType: "provider",
+    })
     if (created.status === "scheduled" || created.status === "checked_in") {
       await emitAppointmentScheduledEvent({
         patient_id: String(created.patientId),

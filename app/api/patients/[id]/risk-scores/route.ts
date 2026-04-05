@@ -9,7 +9,7 @@ type Context = {
 }
 
 export async function GET(request: Request, context: Context) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff"])
+  const auth = await requireRole(request, ["clinic_admin", "research_assistant", "nurse", "doctor"])
   if (!auth.ok) return auth.response
 
   const { id } = await context.params

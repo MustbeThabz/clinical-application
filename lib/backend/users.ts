@@ -2,13 +2,22 @@ import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
-import type { UserRole } from "@/lib/backend/auth"
+import type { ClinicalFlowStage } from "@/lib/backend/types"
+import { ROLE_VALUES, canUserHandleClinicalStage, type UserRole } from "@/lib/roles"
 
 type StoredUser = {
   id: string
   email: string
   name: string
   role: UserRole
+  isOnDuty?: boolean
+  availabilityStatus?: "available" | "busy_with_patient" | "away"
+  phone?: string
+  employeeId?: string
+  department?: string
+  title?: string
+  registrationNumber?: string
+  assignedStages?: ClinicalFlowStage[]
   passwordHash: string
   isActive: boolean
   createdAt: string
@@ -31,13 +40,37 @@ type AuthDb = {
 
 const DATA_DIR = path.join(process.cwd(), "data")
 const DB_PATH = path.join(DATA_DIR, "auth-db.json")
-const USER_ROLES: UserRole[] = ["participant", "clinic_admin", "clinical_staff", "lab_pharmacy"]
+const USER_ROLES: UserRole[] = ROLE_VALUES
 
 const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(2),
-  role: z.enum(["participant", "clinic_admin", "clinical_staff", "lab_pharmacy"]),
+  role: z.enum(["participant", "clinic_admin", "receptionist_admin", "research_assistant", "nurse", "doctor", "lab_personnel", "pharmacist"]),
+  isOnDuty: z.boolean().default(false),
+  availabilityStatus: z.enum(["available", "busy_with_patient", "away"]).default("available"),
+  phone: z.string().min(7).optional(),
+  employeeId: z.string().min(2).optional(),
+  department: z.string().min(2).optional(),
+  title: z.string().min(2).optional(),
+  registrationNumber: z.string().min(2).optional(),
+  assignedStages: z.array(z.enum(["request", "ra", "admin", "nurse", "doctor", "lab", "pharmacy"])).default([]),
   password: z.string().min(8),
+})
+
+const updateUserSchema = z.object({
+  email: z.string().email().optional(),
+  name: z.string().min(2).optional(),
+  role: z.enum(["participant", "clinic_admin", "receptionist_admin", "research_assistant", "nurse", "doctor", "lab_personnel", "pharmacist"]).optional(),
+  isActive: z.boolean().optional(),
+  isOnDuty: z.boolean().optional(),
+  availabilityStatus: z.enum(["available", "busy_with_patient", "away"]).optional(),
+  phone: z.string().min(7).optional(),
+  employeeId: z.string().min(2).optional(),
+  department: z.string().min(2).optional(),
+  title: z.string().min(2).optional(),
+  registrationNumber: z.string().min(2).optional(),
+  assignedStages: z.array(z.enum(["request", "ra", "admin", "nurse", "doctor", "lab", "pharmacy"])).optional(),
+  password: z.string().min(8).optional(),
 })
 
 const forgotPasswordSchema = z.object({
@@ -51,6 +84,7 @@ const resetPasswordSchema = z.object({
 
 export type PublicUser = Omit<StoredUser, "passwordHash">
 export const createUserInputSchema = createUserSchema
+export const updateUserInputSchema = updateUserSchema
 export const forgotPasswordInputSchema = forgotPasswordSchema
 export const resetPasswordInputSchema = resetPasswordSchema
 
@@ -140,6 +174,12 @@ export async function getUserById(id: string): Promise<PublicUser | undefined> {
   return user ? toPublicUser(user) : undefined
 }
 
+export async function getUserByEmail(email: string): Promise<PublicUser | undefined> {
+  const db = await ensureAuthDb()
+  const user = db.users.find((item) => item.email === email.toLowerCase() && item.isActive)
+  return user ? toPublicUser(user) : undefined
+}
+
 export async function authenticateUser(email: string, password: string): Promise<PublicUser | null> {
   const db = await ensureAuthDb()
   const user = db.users.find((item) => item.email === email.toLowerCase() && item.isActive)
@@ -166,6 +206,14 @@ export async function createUser(input: z.infer<typeof createUserSchema>): Promi
     email: payload.email.toLowerCase(),
     name: payload.name,
     role: payload.role,
+    isOnDuty: payload.isOnDuty,
+    availabilityStatus: payload.availabilityStatus,
+    phone: payload.phone,
+    employeeId: payload.employeeId,
+    department: payload.department,
+    title: payload.title,
+    registrationNumber: payload.registrationNumber,
+    assignedStages: payload.assignedStages,
     passwordHash: hashPassword(payload.password),
     isActive: true,
     createdAt: now,
@@ -175,6 +223,73 @@ export async function createUser(input: z.infer<typeof createUserSchema>): Promi
   db.users.push(user)
   await saveAuthDb(db)
   return toPublicUser(user)
+}
+
+export async function updateUser(id: string, input: z.infer<typeof updateUserSchema>): Promise<PublicUser | null> {
+  const payload = updateUserSchema.parse(input)
+  const db = await ensureAuthDb()
+  const idx = db.users.findIndex((item) => item.id === id)
+  if (idx < 0) {
+    return null
+  }
+
+  if (payload.role && !isUserRole(payload.role)) {
+    throw new Error("Invalid role")
+  }
+
+  if (payload.email) {
+    const normalized = payload.email.toLowerCase()
+    const existing = db.users.find((item) => item.id !== id && item.email === normalized)
+    if (existing) {
+      throw new Error("User already exists")
+    }
+    payload.email = normalized
+  }
+
+  const current = db.users[idx]
+  const next: StoredUser = {
+    ...current,
+    ...payload,
+    passwordHash: payload.password ? hashPassword(payload.password) : current.passwordHash,
+    updatedAt: nowIso(),
+  }
+
+  db.users[idx] = next
+  await saveAuthDb(db)
+  return toPublicUser(next)
+}
+
+export async function updateUserAvailability(
+  id: string,
+  input: { isOnDuty?: boolean; availabilityStatus?: "available" | "busy_with_patient" | "away" },
+): Promise<PublicUser | null> {
+  const db = await ensureAuthDb()
+  const idx = db.users.findIndex((item) => item.id === id)
+  if (idx < 0) {
+    return null
+  }
+
+  db.users[idx] = {
+    ...db.users[idx],
+    ...input,
+    updatedAt: nowIso(),
+  }
+
+  await saveAuthDb(db)
+  return toPublicUser(db.users[idx])
+}
+
+export async function findAvailableClinicianForStage(stage: ClinicalFlowStage, excludeUserId?: string): Promise<PublicUser | null> {
+  const db = await ensureAuthDb()
+  const candidate = db.users.find((user) => {
+    if (!user.isActive) return false
+    if (user.id === excludeUserId) return false
+    if (!user.isOnDuty) return false
+    if ((user.availabilityStatus ?? "available") !== "available") return false
+    return canUserHandleClinicalStage(user.role, stage, user.assignedStages)
+  })
+
+  return candidate ? toPublicUser(candidate) : null
 }
 
 export async function createPasswordReset(email: string): Promise<string | null> {

@@ -1,21 +1,41 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { NextResponse } from "next/server"
-
-export type UserRole = "participant" | "clinic_admin" | "clinical_staff" | "lab_pharmacy"
+import { writeAuditLogSafe } from "@/lib/backend/db"
+import {
+  ROLE_VALUES,
+  canAdvanceClinicalStage as canAdvanceClinicalStageForRole,
+  getClinicalStageAllowedRoles as getClinicalStageAllowedRolesForStage,
+  getRoleLabel as getRoleLabelForUser,
+  type UserRole,
+} from "@/lib/roles"
+import { getUserByEmail, getUserById } from "@/lib/backend/users"
 
 export type RequestContext = {
   userId: string
   role: UserRole
   email?: string
   name?: string
+  assignedStages?: import("@/lib/backend/types").ClinicalFlowStage[]
 }
 
-const ROLE_VALUES: UserRole[] = ["participant", "clinic_admin", "clinical_staff", "lab_pharmacy"]
+export const STAFF_ROLE_VALUES: UserRole[] = ROLE_VALUES.filter((role) => role !== "participant")
 const SESSION_COOKIE = "clinical_session"
 const SESSION_TTL_SECONDS = 60 * 60 * 8
 
 function isUserRole(value: string): value is UserRole {
   return ROLE_VALUES.includes(value as UserRole)
+}
+
+export function getRoleLabel(role: UserRole) {
+  return getRoleLabelForUser(role)
+}
+
+export function canAdvanceClinicalStage(role: UserRole, stage: import("@/lib/backend/types").ClinicalFlowStage) {
+  return canAdvanceClinicalStageForRole(role, stage)
+}
+
+export function getClinicalStageAllowedRoles(stage: import("@/lib/backend/types").ClinicalFlowStage) {
+  return getClinicalStageAllowedRolesForStage(stage)
 }
 
 type SessionPayload = {
@@ -40,6 +60,11 @@ function fromBase64Url(value: string) {
 
 function sign(value: string) {
   return createHmac("sha256", sessionSecret()).update(value).digest("base64url")
+}
+
+function auditRequestTarget(request: Request) {
+  const url = new URL(request.url)
+  return `${request.method} ${url.pathname}`
 }
 
 function parseCookies(cookieHeader: string | null) {
@@ -85,28 +110,60 @@ export function getSessionFromCookieHeader(cookieHeader: string | null): Request
   }
 }
 
-export function getRequestContext(request: Request): RequestContext | null {
+export async function getRequestContext(request: Request): Promise<RequestContext | null> {
   const cookieContext = getSessionFromCookieHeader(request.headers.get("cookie"))
   if (cookieContext) {
-    return cookieContext
+    const user = await getUserById(cookieContext.userId)
+    if (!user) {
+      return null
+    }
+
+    return {
+      userId: user.id,
+      role: user.role,
+      email: user.email,
+      name: user.name,
+      assignedStages: user.assignedStages,
+    }
   }
 
   if (process.env.ALLOW_HEADER_AUTH !== "true") {
     return null
   }
 
+  if (process.env.NODE_ENV === "production") {
+    return null
+  }
+
   const headerRole = request.headers.get("x-user-role")?.trim().toLowerCase()
-  const role = headerRole && isUserRole(headerRole) ? headerRole : null
+  if (!headerRole || !isUserRole(headerRole)) return null
 
-  if (!role) return null
+  const userId = request.headers.get("x-user-id")?.trim()
+  const email = request.headers.get("x-user-email")?.trim()
+  const user = userId ? await getUserById(userId) : email ? await getUserByEmail(email) : undefined
 
-  const userId = request.headers.get("x-user-id")?.trim() || "header-user"
-  return { userId, role }
+  if (!user || user.role !== headerRole) {
+    return null
+  }
+
+  return {
+    userId: user.id,
+    role: user.role,
+    email: user.email,
+    name: user.name,
+    assignedStages: user.assignedStages,
+  }
 }
 
-export function requireRole(request: Request, allowedRoles: UserRole[]) {
-  const context = getRequestContext(request)
+export async function requireRole(request: Request, allowedRoles: UserRole[]) {
+  const context = await getRequestContext(request)
   if (!context) {
+    await writeAuditLogSafe({
+      entityType: "security",
+      entityId: auditRequestTarget(request),
+      action: "auth_unauthorized",
+      actorType: "api_client",
+    })
     return {
       ok: false as const,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
@@ -114,6 +171,12 @@ export function requireRole(request: Request, allowedRoles: UserRole[]) {
   }
 
   if (!allowedRoles.includes(context.role)) {
+    await writeAuditLogSafe({
+      entityType: "security",
+      entityId: context.userId,
+      action: `auth_forbidden:${context.role}:${request.method}:${new URL(request.url).pathname}`,
+      actorType: "api_client",
+    })
     return {
       ok: false as const,
       response: NextResponse.json(
@@ -130,9 +193,15 @@ export function requireRole(request: Request, allowedRoles: UserRole[]) {
   return { ok: true as const, context }
 }
 
-export function requireAuth(request: Request) {
-  const context = getRequestContext(request)
+export async function requireAuth(request: Request) {
+  const context = await getRequestContext(request)
   if (!context) {
+    await writeAuditLogSafe({
+      entityType: "security",
+      entityId: auditRequestTarget(request),
+      action: "auth_unauthorized",
+      actorType: "api_client",
+    })
     return {
       ok: false as const,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),

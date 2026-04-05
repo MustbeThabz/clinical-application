@@ -14,6 +14,8 @@ export const patientSchema = z.object({
   email: z.string().email().optional(),
   conditionSummary: z.string(),
   callTriggerPhone: z.string().optional(),
+  nextOfKinName: z.string().optional(),
+  nextOfKinPhone: z.string().optional(),
   homeVisitAddress: z.string().optional(),
   homeLatitude: z.string().optional(),
   homeLongitude: z.string().optional(),
@@ -55,9 +57,13 @@ export type RiskScore = z.infer<typeof riskScoreSchema>
 export const clinicalTaskSchema = z.object({
   id: z.string(),
   patientId: z.string(),
+  title: z.string(),
+  relatedAlertId: z.string().optional(),
   taskType: z.enum(["outreach", "education", "medication_review", "lab_follow_up", "appointment_reminder"]),
   priority: z.enum(["low", "medium", "high", "critical"]),
   status: z.enum(["open", "in_progress", "done", "cancelled"]),
+  assignedUserId: z.string().optional(),
+  assignedUserName: z.string().optional(),
   dueAt: z.string().optional(),
   notes: z.string().optional(),
   createdAt: z.string(),
@@ -96,6 +102,9 @@ export const clinicalFlowSchema = z.object({
   appointmentId: z.string().optional(),
   entryMethod: z.enum(["scan", "admin"]),
   currentStage: clinicalFlowStageSchema,
+  currentHandlerUserId: z.string().optional(),
+  currentHandlerName: z.string().optional(),
+  currentHandlerRole: z.string().optional(),
   status: z.enum(["active", "completed", "cancelled"]),
   needsNextVisit: z.boolean().default(false),
   startedAt: z.string(),
@@ -116,6 +125,14 @@ export const clinicalFlowEventSchema = z.object({
 })
 export type ClinicalFlowEvent = z.infer<typeof clinicalFlowEventSchema>
 
+export const activityReadSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  itemId: z.string(),
+  readAt: z.string(),
+})
+export type ActivityRead = z.infer<typeof activityReadSchema>
+
 export const dbSchema = z.object({
   patients: z.array(patientSchema),
   appointments: z.array(appointmentSchema),
@@ -125,6 +142,7 @@ export const dbSchema = z.object({
   auditLogs: z.array(auditLogSchema),
   clinicFlows: z.array(clinicalFlowSchema).default([]),
   clinicFlowEvents: z.array(clinicalFlowEventSchema).default([]),
+  activityReads: z.array(activityReadSchema).default([]),
 })
 export type ClinicalDb = z.infer<typeof dbSchema>
 
@@ -137,6 +155,8 @@ export const createPatientInputSchema = z.object({
   email: z.string().email().optional(),
   conditionSummary: z.string().min(1),
   callTriggerPhone: z.string().optional(),
+  nextOfKinName: z.string().optional(),
+  nextOfKinPhone: z.string().optional(),
   homeVisitAddress: z.string().optional(),
   homeLatitude: z.string().optional(),
   homeLongitude: z.string().optional(),

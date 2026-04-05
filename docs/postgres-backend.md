@@ -37,5 +37,5 @@ Protected routes require a valid login session cookie created by `POST /api/auth
 Optional header-based auth can be enabled only for local testing:
 
 - `ALLOW_HEADER_AUTH=true`
-- `x-user-role`: `participant|clinic_admin|clinical_staff|lab_pharmacy`
+- `x-user-role`: `participant|clinic_admin|receptionist_admin|research_assistant|nurse|doctor|lab_personnel|pharmacist`
 - `x-user-id`: any user identifier

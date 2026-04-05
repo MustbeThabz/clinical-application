@@ -1,115 +1,69 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import {
   Activity,
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
   Bot,
   Calendar,
   CheckCircle2,
   Clock,
+  MessageSquare,
+  RefreshCw,
   TrendingUp,
   Users,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 
-const statsCards = [
-  {
-    title: "Active Patients",
-    value: "2,847",
-    change: "+12%",
-    trend: "up",
-    icon: Users,
-    color: "text-primary",
-    bgColor: "bg-primary/10",
-  },
-  {
-    title: "High Risk Cases",
-    value: "23",
-    change: "-8%",
-    trend: "down",
-    icon: AlertTriangle,
-    color: "text-destructive",
-    bgColor: "bg-destructive/10",
-  },
-  {
-    title: "AI Actions Today",
-    value: "156",
-    change: "+24%",
-    trend: "up",
-    icon: Bot,
-    color: "text-accent",
-    bgColor: "bg-accent/10",
-  },
-  {
-    title: "Appointments Today",
-    value: "48",
-    change: "+5%",
-    trend: "up",
-    icon: Calendar,
-    color: "text-success",
-    bgColor: "bg-success/10",
-  },
-]
+type DashboardOverview = {
+  stats: {
+    activePatients: number
+    highRiskCases: number
+    aiActionsToday: number
+    appointmentsToday: number
+  }
+  riskAlerts: Array<{
+    id: string
+    patient: string
+    patientId: string
+    risk: number
+    level: string
+    reason: string
+    action: string
+    time: string
+  }>
+  workflowStatus: Array<{
+    label: string
+    value: number
+    total: number
+    color: string
+  }>
+  agentActivity: Array<{
+    action: string
+    count: number
+    icon: string
+  }>
+  operationalSnapshot: {
+    openAlerts: number
+    openTasks: number
+    activeLoops: number
+    lastUpdatedAt: string
+  }
+}
 
-const recentAlerts = [
-  {
-    id: 1,
-    patient: "John Doe",
-    patientId: "P-1024",
-    risk: 0.92,
-    level: "HIGH",
-    reason: "Missed CHF follow-up + Confusion symptoms + Meds interruption",
-    action: "Escalate to nurse within 24 hours",
-    time: "2 min ago",
-  },
-  {
-    id: 2,
-    patient: "Maria Santos",
-    patientId: "P-2156",
-    risk: 0.78,
-    level: "HIGH",
-    reason: "7 days missed medication + Detectable viral load",
-    action: "Immediate clinical review",
-    time: "15 min ago",
-  },
-  {
-    id: 3,
-    patient: "Robert Chen",
-    patientId: "P-3891",
-    risk: 0.65,
-    level: "MEDIUM",
-    reason: "Missed 2 consecutive appointments",
-    action: "Automated call scheduled",
-    time: "32 min ago",
-  },
-  {
-    id: 4,
-    patient: "Emily Watson",
-    patientId: "P-4521",
-    risk: 0.45,
-    level: "LOW",
-    reason: "Missed flu shot appointment",
-    action: "SMS reminder sent",
-    time: "1 hr ago",
-  },
-]
-
-const workflowStats = [
-  { label: "Pending Review", value: 12, total: 50, color: "bg-warning" },
-  { label: "In Progress", value: 28, total: 50, color: "bg-primary" },
-  { label: "Completed", value: 47, total: 50, color: "bg-success" },
-]
-
-const agentActivity = [
-  { action: "SMS Reminder Sent", count: 89, icon: CheckCircle2 },
-  { action: "Voice Calls Triggered", count: 24, icon: Activity },
-  { action: "Nurse Escalations", count: 12, icon: AlertTriangle },
-  { action: "Files Flagged", count: 31, icon: Clock },
-]
+function formatClinicTime(value?: string) {
+  if (!value) return "--:--"
+  return new Intl.DateTimeFormat("en-ZA", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "Africa/Johannesburg",
+  }).format(new Date(value))
+}
 
 function getRiskBadgeVariant(level: string) {
   switch (level) {
@@ -122,16 +76,108 @@ function getRiskBadgeVariant(level: string) {
   }
 }
 
+function getActivityIcon(icon: string) {
+  switch (icon) {
+    case "whatsapp":
+      return MessageSquare
+    case "call":
+      return Activity
+    case "clock":
+      return Clock
+    default:
+      return AlertTriangle
+  }
+}
+
 export function DashboardView() {
+  const [overview, setOverview] = useState<DashboardOverview>({
+    stats: {
+      activePatients: 0,
+      highRiskCases: 0,
+      aiActionsToday: 0,
+      appointmentsToday: 0,
+    },
+    riskAlerts: [],
+    workflowStatus: [],
+    agentActivity: [],
+    operationalSnapshot: {
+      openAlerts: 0,
+      openTasks: 0,
+      activeLoops: 0,
+      lastUpdatedAt: "",
+    },
+  })
+  const [loading, setLoading] = useState(true)
+
+  const loadOverview = async () => {
+    try {
+      const response = await fetch("/api/dashboard/overview", { cache: "no-store" })
+      if (!response.ok) return
+      const result = (await response.json()) as { data?: DashboardOverview }
+      if (result.data) {
+        setOverview(result.data)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadOverview()
+    const interval = window.setInterval(() => {
+      void loadOverview()
+    }, 15000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  const statsCards = [
+    {
+      title: "Active Patients",
+      value: overview.stats.activePatients,
+      caption: "Current patient cohort",
+      icon: Users,
+      color: "text-primary",
+      bgColor: "bg-primary/10",
+    },
+    {
+      title: "High Risk Cases",
+      value: overview.stats.highRiskCases,
+      caption: "Patients needing closer attention",
+      icon: AlertTriangle,
+      color: "text-destructive",
+      bgColor: "bg-destructive/10",
+    },
+    {
+      title: "AI Actions Today",
+      value: overview.stats.aiActionsToday,
+      caption: "Live agent actions recorded today",
+      icon: Bot,
+      color: "text-accent",
+      bgColor: "bg-accent/10",
+    },
+    {
+      title: "Appointments Today",
+      value: overview.stats.appointmentsToday,
+      caption: "Appointments scheduled for today",
+      icon: Calendar,
+      color: "text-success",
+      bgColor: "bg-success/10",
+    },
+  ]
+
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Clinical Dashboard</h1>
-        <p className="text-muted-foreground">AI-powered overview of patient care and system operations</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Clinical Dashboard</h1>
+          <p className="text-muted-foreground">Live overview of patients, risk, workflows, scheduling, and AI agent activity.</p>
+        </div>
+        <Button variant="outline" onClick={() => void loadOverview()}>
+          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
       </div>
 
-      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {statsCards.map((stat) => (
           <Card key={stat.title} className="border-0 shadow-sm">
@@ -139,18 +185,10 @@ export function DashboardView() {
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">{stat.title}</p>
-                  <p className="text-3xl font-bold mt-1">{stat.value}</p>
-                  <div className="flex items-center gap-1 mt-2">
-                    {stat.trend === "up" ? (
-                      <ArrowUp className="w-3 h-3 text-success" />
-                    ) : (
-                      <ArrowDown className="w-3 h-3 text-success" />
-                    )}
-                    <span className="text-xs text-success font-medium">{stat.change}</span>
-                    <span className="text-xs text-muted-foreground">vs last week</span>
-                  </div>
+                  <p className="mt-1 text-3xl font-bold">{stat.value}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{stat.caption}</p>
                 </div>
-                <div className={`p-3 rounded-xl ${stat.bgColor}`}>
+                <div className={`rounded-xl p-3 ${stat.bgColor}`}>
                   <stat.icon className={`w-6 h-6 ${stat.color}`} />
                 </div>
               </div>
@@ -159,15 +197,13 @@ export function DashboardView() {
         ))}
       </div>
 
-      {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Risk Alerts */}
         <Card className="lg:col-span-2 border-0 shadow-sm">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-lg">AI Risk Alerts</CardTitle>
-                <CardDescription>Patients requiring attention based on AI analysis</CardDescription>
+                <CardDescription>Live patients requiring attention based on the current risk model.</CardDescription>
               </div>
               <Badge variant="outline" className="font-normal">
                 <Activity className="w-3 h-3 mr-1" />
@@ -177,104 +213,114 @@ export function DashboardView() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {recentAlerts.map((alert) => (
-                <div
-                  key={alert.id}
-                  className="flex items-start gap-4 p-4 rounded-lg bg-secondary/30 hover:bg-secondary/50 transition-colors"
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    <div
-                      className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold ${
-                        alert.level === "HIGH"
-                          ? "bg-destructive/20 text-destructive"
-                          : alert.level === "MEDIUM"
-                          ? "bg-warning/20 text-warning"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {Math.round(alert.risk * 100)}
-                    </div>
-                    <span className="text-[10px] text-muted-foreground">Score</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold">{alert.patient}</span>
-                      <span className="text-xs text-muted-foreground">{alert.patientId}</span>
-                      <Badge variant={getRiskBadgeVariant(alert.level)} className="text-[10px]">
-                        {alert.level}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-2">{alert.reason}</p>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-primary font-medium">{alert.action}</span>
-                      <span className="text-xs text-muted-foreground">{alert.time}</span>
-                    </div>
-                  </div>
+              {overview.riskAlerts.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                  No live risk alerts are available yet.
                 </div>
-              ))}
+              ) : (
+                overview.riskAlerts.map((alert) => (
+                  <div key={alert.id} className="flex items-start gap-4 rounded-lg bg-secondary/30 p-4 transition-colors hover:bg-secondary/50">
+                    <div className="flex flex-col items-center gap-1">
+                      <div
+                        className={`flex h-12 w-12 items-center justify-center rounded-full text-sm font-bold ${
+                          alert.level === "HIGH"
+                            ? "bg-destructive/20 text-destructive"
+                            : alert.level === "MEDIUM"
+                              ? "bg-warning/20 text-warning"
+                              : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {Math.round(alert.risk * 100)}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">Score</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="font-semibold">{alert.patient}</span>
+                        <span className="text-xs text-muted-foreground">{alert.patientId}</span>
+                        <Badge variant={getRiskBadgeVariant(alert.level)} className="text-[10px]">
+                          {alert.level}
+                        </Badge>
+                      </div>
+                      <p className="mb-2 text-sm text-muted-foreground">{alert.reason}</p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-primary">{alert.action}</span>
+                        <span className="text-xs text-muted-foreground">{alert.time}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Side Panel */}
         <div className="space-y-6">
-          {/* Workflow Status */}
           <Card className="border-0 shadow-sm">
             <CardHeader>
               <CardTitle className="text-lg">Workflow Status</CardTitle>
-              <CardDescription>Current clinical workflow progress</CardDescription>
+              <CardDescription>Live operational load across escalations and clinical flows.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {workflowStats.map((stat) => (
+              {overview.workflowStatus.map((stat) => (
                 <div key={stat.label}>
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2 flex items-center justify-between">
                     <span className="text-sm">{stat.label}</span>
                     <span className="text-sm font-medium">
                       {stat.value}/{stat.total}
                     </span>
                   </div>
-                  <Progress value={(stat.value / stat.total) * 100} className={`h-2 ${stat.color}`} />
+                  <Progress value={(stat.value / Math.max(1, stat.total)) * 100} className="h-2" />
                 </div>
               ))}
             </CardContent>
           </Card>
 
-          {/* Agent Activity */}
           <Card className="border-0 shadow-sm">
             <CardHeader>
               <CardTitle className="text-lg">AI Agent Activity</CardTitle>
-              <CardDescription>Actions completed today</CardDescription>
+              <CardDescription>Live channel activity recorded today.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {agentActivity.map((item) => (
-                  <div key={item.action} className="flex items-center justify-between p-3 rounded-lg bg-secondary/30">
-                    <div className="flex items-center gap-3">
-                      <item.icon className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm">{item.action}</span>
+                {overview.agentActivity.map((item) => {
+                  const Icon = getActivityIcon(item.icon)
+                  return (
+                    <div key={item.action} className="flex items-center justify-between rounded-lg bg-secondary/30 p-3">
+                      <div className="flex items-center gap-3">
+                        <Icon className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-sm">{item.action}</span>
+                      </div>
+                      <span className="text-lg font-bold text-primary">{item.count}</span>
                     </div>
-                    <span className="text-lg font-bold text-primary">{item.count}</span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </CardContent>
           </Card>
 
-          {/* System Health */}
           <Card className="border-0 shadow-sm bg-primary text-primary-foreground">
             <CardContent className="p-6">
-              <div className="flex items-center gap-3 mb-4">
+              <div className="mb-4 flex items-center gap-3">
                 <TrendingUp className="w-5 h-5" />
-                <span className="font-semibold">System Performance</span>
+                <span className="font-semibold">Operational Snapshot</span>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-2xl font-bold">99.8%</p>
-                  <p className="text-xs text-primary-foreground/70">Uptime</p>
+                  <p className="text-2xl font-bold">{overview.operationalSnapshot.openAlerts}</p>
+                  <p className="text-xs text-primary-foreground/70">Open alerts</p>
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{"<"}1s</p>
-                  <p className="text-xs text-primary-foreground/70">Avg Response</p>
+                  <p className="text-2xl font-bold">{overview.operationalSnapshot.openTasks}</p>
+                  <p className="text-xs text-primary-foreground/70">Open tasks</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{overview.operationalSnapshot.activeLoops}</p>
+                  <p className="text-xs text-primary-foreground/70">Active AI loops</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">{formatClinicTime(overview.operationalSnapshot.lastUpdatedAt)}</p>
+                  <p className="text-xs text-primary-foreground/70">Last updated</p>
                 </div>
               </div>
             </CardContent>
