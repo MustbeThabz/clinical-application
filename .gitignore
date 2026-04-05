@@ -25,5 +25,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python cache
+__pycache__/
+*.py[cod]
+
+# local tools and editor metadata
+.codex
+tools/ngrok/
+
 # local datastore
 data/clinical-db.json
+data/auth-db.json

@@ -6,7 +6,15 @@ import { createPatientInputSchema } from "@/lib/backend/types"
 export const runtime = "nodejs"
 
 export async function GET(request: Request) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff", "lab_pharmacy"])
+  const auth = await requireRole(request, [
+    "clinic_admin",
+    "receptionist_admin",
+    "research_assistant",
+    "nurse",
+    "doctor",
+    "lab_personnel",
+    "pharmacist",
+  ])
   if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(request.url)
@@ -18,7 +26,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff"])
+  const auth = await requireRole(request, ["clinic_admin", "receptionist_admin"])
   if (!auth.ok) return auth.response
 
   try {

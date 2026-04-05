@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getPatientById, updateAppointmentStatus } from "@/lib/backend/db"
+import { getPatientById, updateAppointmentStatus, writeAuditLogSafe } from "@/lib/backend/db"
 import { requireRole } from "@/lib/backend/auth"
 
 export const runtime = "nodejs"
@@ -38,7 +38,7 @@ async function emitVisitCompletedEvent(payload: {
 }
 
 export async function PATCH(request: Request, context: Context) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff"])
+  const auth = await requireRole(request, ["clinic_admin", "receptionist_admin", "nurse", "doctor"])
   if (!auth.ok) return auth.response
 
   const { id } = await context.params
@@ -57,6 +57,13 @@ export async function PATCH(request: Request, context: Context) {
     if (!updated) {
       return NextResponse.json({ error: "Appointment not found" }, { status: 404 })
     }
+
+    await writeAuditLogSafe({
+      entityType: "appointment",
+      entityId: String(updated.id),
+      action: `rbac_appointment_status_update:${body.status}:${auth.context.role}`,
+      actorType: "provider",
+    })
 
     if (updated.status === "completed") {
       const patient = await getPatientById(String(updated.patientId))

@@ -22,6 +22,13 @@ class AppointmentScheduledEvent(BaseModel):
     scheduled_start: datetime
 
 
+class ReminderCallConfirmationEvent(BaseModel):
+    patient_id: str
+    source: Literal["patient_call", "next_of_kin_call"] = "patient_call"
+    confirmed_by: Literal["patient", "next_of_kin"] = "patient"
+    digits: str = "1"
+
+
 class InboundMessage(BaseModel):
     from_phone: str
     text: str

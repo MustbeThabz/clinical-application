@@ -24,6 +24,7 @@ This repo now includes a Python agent service at `agent_service/` using:
 - Next.js linkage:
   - `PATCH /api/scheduling/appointments/:id` added
   - When status becomes `completed`, Next.js emits `VISIT_COMPLETED` to the Python service
+  - When the clinical workflow is completed from the `pharmacy` stage for a chronic-care patient, Next.js also emits `VISIT_COMPLETED` after medication collection unless staff already created a manual next visit
   - Manual relay endpoint added at `POST /api/agent/events/visit-completed`
 
 ## API Contracts Needed From The Clinical App

@@ -6,11 +6,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import psycopg2
 import psycopg2.extras
 
 from .config import settings
+
+
+CLINIC_TZ = ZoneInfo(settings.clinic_timezone)
 
 
 @contextmanager
@@ -59,7 +63,7 @@ def execute(sql: str, params: tuple[Any, ...] = ()) -> None:
 def get_patient_by_phone(phone: str) -> dict[str, Any] | None:
     return fetch_one(
         """
-        SELECT id, first_name, last_name, phone, call_trigger_phone, condition_summary, home_visit_address, home_latitude, home_longitude
+        SELECT id, first_name, last_name, phone, call_trigger_phone, next_of_kin_name, next_of_kin_phone, condition_summary, home_visit_address, home_latitude, home_longitude
         FROM patients
         WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = regexp_replace(%s, '\\D', '', 'g')
         LIMIT 1
@@ -71,7 +75,7 @@ def get_patient_by_phone(phone: str) -> dict[str, Any] | None:
 def get_patient(patient_id: str) -> dict[str, Any] | None:
     return fetch_one(
         """
-        SELECT id, first_name, last_name, phone, call_trigger_phone, condition_summary, home_visit_address, home_latitude, home_longitude
+        SELECT id, first_name, last_name, phone, call_trigger_phone, next_of_kin_name, next_of_kin_phone, condition_summary, home_visit_address, home_latitude, home_longitude
         FROM patients
         WHERE id = %s::uuid
         LIMIT 1
@@ -114,18 +118,16 @@ def get_rule(program_code: str, service_type: str) -> dict[str, Any] | None:
     )
 
 
-def _to_utc_day(dt: datetime) -> datetime:
-    return dt.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-
-
 def find_available_slots(window_start: datetime, window_end: datetime) -> list[tuple[datetime, datetime]]:
     starts = []
-    day = _to_utc_day(window_start)
-    end_day = _to_utc_day(window_end)
+    local_window_start = window_start.astimezone(CLINIC_TZ)
+    local_window_end = window_end.astimezone(CLINIC_TZ)
+    day = local_window_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_day = local_window_end.replace(hour=0, minute=0, second=0, microsecond=0)
 
     while day <= end_day:
         for hour in (9, 11, 14):
-            starts.append(day.replace(hour=hour))
+            starts.append(day.replace(hour=hour, minute=0, second=0, microsecond=0).astimezone(timezone.utc))
         day += timedelta(days=1)
 
     blocked = fetch_all(
@@ -155,7 +157,8 @@ def find_available_slots(window_start: datetime, window_end: datetime) -> list[t
         if not overlap and start >= window_start.astimezone(timezone.utc) and start <= window_end.astimezone(timezone.utc):
             available.append((start, end))
 
-    return available[:3]
+    # Keep WhatsApp option messages short but provide enough choice.
+    return available[:5]
 
 
 def create_hold(
@@ -218,6 +221,20 @@ def get_hold(hold_id: str) -> dict[str, Any] | None:
     )
 
 
+def get_latest_active_hold(patient_id: str) -> dict[str, Any] | None:
+    return fetch_one(
+        """
+        SELECT *
+        FROM agent_appointment_holds
+        WHERE patient_id = %s::uuid
+          AND status = 'PROPOSED'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (patient_id,),
+    )
+
+
 def update_hold_choice(hold_id: str, start_at: datetime, end_at: datetime) -> None:
     execute(
         """
@@ -251,7 +268,7 @@ def mark_hold_expired(hold_id: str) -> None:
     )
 
 
-def create_appointment_from_hold(hold: dict[str, Any]) -> None:
+def create_appointment_from_hold(hold: dict[str, Any]) -> str:
     appointment_id = str(uuid4())
     execute(
         """
@@ -281,6 +298,17 @@ def create_appointment_from_hold(hold: dict[str, Any]) -> None:
         (hold["selected_start_at"], hold["patient_id"]),
     )
 
+    next_action_at = hold["selected_start_at"] - timedelta(days=2)
+    create_reminder_workflow(
+        appointment_id=appointment_id,
+        patient_id=str(hold["patient_id"]),
+        scheduled_start=hold["selected_start_at"],
+        stage="stage1_text",
+        status="pending_ack",
+        next_action_at=next_action_at,
+    )
+    return appointment_id
+
 
 def get_next_scheduled_appointment(patient_id: str) -> dict[str, Any] | None:
     return fetch_one(
@@ -297,7 +325,7 @@ def get_next_scheduled_appointment(patient_id: str) -> dict[str, Any] | None:
     )
 
 
-def reschedule_appointment(appointment_id: str, start_at: datetime, end_at: datetime) -> None:
+def reschedule_appointment(appointment_id: str, patient_id: str, start_at: datetime, end_at: datetime) -> None:
     execute(
         """
         UPDATE appointments
@@ -309,6 +337,14 @@ def reschedule_appointment(appointment_id: str, start_at: datetime, end_at: date
         WHERE id = %s::uuid
         """,
         (start_at, end_at, appointment_id),
+    )
+    execute(
+        """
+        UPDATE patients
+        SET next_appointment = %s::date, updated_at = NOW()
+        WHERE id = %s::uuid
+        """,
+        (start_at, patient_id),
     )
 
 
@@ -349,6 +385,8 @@ def list_appointments_for_initial_reminder(now_utc: datetime) -> list[dict[str, 
                a.scheduled_end,
                p.phone,
                p.call_trigger_phone,
+               p.next_of_kin_name,
+               p.next_of_kin_phone,
                p.first_name,
                p.last_name
         FROM appointments a
@@ -407,12 +445,14 @@ def list_due_reminder_workflows(now_utc: datetime) -> list[dict[str, Any]]:
                rw.acknowledged_at,
                p.phone,
                p.call_trigger_phone,
+               p.next_of_kin_name,
+               p.next_of_kin_phone,
                p.first_name,
                p.last_name
         FROM appointment_reminder_workflows rw
         JOIN patients p ON p.id = rw.patient_id
         JOIN appointments a ON a.id = rw.appointment_id
-        WHERE rw.status = 'pending_ack'
+        WHERE rw.status IN ('pending_ack', 'confirmed_waiting_day_of')
           AND rw.next_action_at IS NOT NULL
           AND rw.next_action_at <= %s
           AND a.status IN ('scheduled', 'checked_in')
@@ -429,7 +469,9 @@ def advance_reminder_workflow(
     status: str,
     next_action_at: datetime | None,
     mark_auto_call: bool = False,
+    mark_next_of_kin_call: bool = False,
     mark_nurse_alert: bool = False,
+    mark_day_of_reminder: bool = False,
 ) -> None:
     execute(
         """
@@ -439,19 +481,31 @@ def advance_reminder_workflow(
             next_action_at = %s,
             last_sent_at = NOW(),
             auto_call_at = CASE WHEN %s THEN NOW() ELSE auto_call_at END,
+            next_of_kin_called_at = CASE WHEN %s THEN NOW() ELSE next_of_kin_called_at END,
             nurse_alerted_at = CASE WHEN %s THEN NOW() ELSE nurse_alerted_at END,
+            day_of_reminder_sent_at = CASE WHEN %s THEN NOW() ELSE day_of_reminder_sent_at END,
             updated_at = NOW()
         WHERE reminder_id = %s::uuid
         """,
-        (stage, status, next_action_at, mark_auto_call, mark_nurse_alert, reminder_id),
+        (stage, status, next_action_at, mark_auto_call, mark_next_of_kin_call, mark_nurse_alert, mark_day_of_reminder, reminder_id),
     )
 
 
-def acknowledge_pending_reminder(patient_id: str, channel: str, ack_text: str) -> dict[str, Any] | None:
+def acknowledge_pending_reminder(
+    patient_id: str,
+    channel: str,
+    ack_text: str,
+    *,
+    next_action_at: datetime | None = None,
+) -> dict[str, Any] | None:
+    next_stage = "stage_confirmed_day_of_pending" if next_action_at else "stage_confirmed"
+    next_status = "confirmed_waiting_day_of" if next_action_at else "acknowledged"
     updated = fetch_one(
         """
         UPDATE appointment_reminder_workflows
-        SET status = 'acknowledged',
+        SET stage = %s,
+            status = %s,
+            next_action_at = %s,
             acknowledged_at = NOW(),
             acknowledged_via = %s,
             updated_at = NOW()
@@ -465,7 +519,7 @@ def acknowledge_pending_reminder(patient_id: str, channel: str, ack_text: str) -
         )
         RETURNING reminder_id, appointment_id, patient_id, scheduled_start, stage, status, acknowledged_at
         """,
-        (channel, patient_id),
+        (next_stage, next_status, next_action_at, channel, patient_id),
     )
     if updated:
         add_audit_log(
@@ -473,7 +527,11 @@ def acknowledge_pending_reminder(patient_id: str, channel: str, ack_text: str) -
             "PATIENT",
             patient_id,
             {"text": ack_text, "channel": channel},
-            {"reminder_id": str(updated["reminder_id"])},
+            {
+                "reminder_id": str(updated["reminder_id"]),
+                "status": next_status,
+                "next_action_at": next_action_at.isoformat() if next_action_at else None,
+            },
         )
     return updated
 

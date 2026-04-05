@@ -18,10 +18,15 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
 
     internal_api_token: str = "change-me"
-    reminder_ack_wait_hours_stage1: int = 24
-    reminder_ack_wait_hours_stage2: int = 12
-    reminder_ack_wait_hours_after_call: int = 6
+    clinic_timezone: str = "Africa/Johannesburg"
+    whatsapp_clinic_name: str = "Clinic Care Team"
+    reminder_ack_wait_hours_stage1: int = 3
+    reminder_ack_wait_hours_stage2: int = 3
+    reminder_ack_wait_hours_after_call: int = 3
+    reminder_ack_wait_hours_after_next_of_kin: int = 3
+    reminder_day_of_hours_before: int = 6
     nurse_alert_phone: str = ""
+    homebase_alert_phone: str = ""
 
 
 settings = Settings()

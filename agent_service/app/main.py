@@ -8,9 +8,10 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from app import db
 from app.config import settings
 from app.redis_store import seen_message
-from app.schemas import AppointmentScheduledEvent, InboundMessage, VisitCompletedEvent
+from app.schemas import AppointmentScheduledEvent, InboundMessage, ReminderCallConfirmationEvent, VisitCompletedEvent
 from app.services.scheduler import (
     auto_schedule_from_visit,
+    confirm_reminder_from_call,
     handle_patient_message,
     notify_patient_appointment_scheduled,
     process_visit_reminders,
@@ -31,10 +32,10 @@ def _extract_inbound_text(msg: dict) -> str:
         kind = interactive.get("type")
         if kind == "button_reply":
             reply = interactive.get("button_reply") or {}
-            return (reply.get("title") or reply.get("id") or "").strip()
+            return (reply.get("id") or reply.get("title") or "").strip()
         if kind == "list_reply":
             reply = interactive.get("list_reply") or {}
-            return (reply.get("title") or reply.get("id") or "").strip()
+            return (reply.get("id") or reply.get("title") or "").strip()
     return ""
 
 
@@ -75,6 +76,16 @@ async def run_visit_reminders(x_internal_token: str | None = Header(default=None
 
     result = await process_visit_reminders()
     return JSONResponse(result, status_code=200)
+
+
+@app.post("/events/reminder-call-confirmed")
+async def reminder_call_confirmed(event: ReminderCallConfirmationEvent, x_internal_token: str | None = Header(default=None)):
+    if x_internal_token != settings.internal_api_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    result = await confirm_reminder_from_call(event.patient_id, event.source, event.confirmed_by, event.digits)
+    status = 200 if result.get("ok") else 400
+    return JSONResponse(result, status_code=status)
 
 
 @app.get("/webhook/whatsapp")

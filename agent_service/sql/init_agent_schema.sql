@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS patients (
   sex_at_birth TEXT NOT NULL,
   phone TEXT,
   call_trigger_phone TEXT,
+  next_of_kin_name TEXT,
+  next_of_kin_phone TEXT,
   email TEXT,
   condition_summary TEXT NOT NULL,
   home_visit_address TEXT,
@@ -23,6 +25,8 @@ CREATE TABLE IF NOT EXISTS patients (
 );
 
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS call_trigger_phone TEXT;
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS next_of_kin_name TEXT;
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS next_of_kin_phone TEXT;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS home_visit_address TEXT;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS home_latitude DOUBLE PRECISION;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS home_longitude DOUBLE PRECISION;
@@ -79,14 +83,23 @@ CREATE INDEX IF NOT EXISTS idx_visit_events_patient_time
 CREATE TABLE IF NOT EXISTS tasks (
   id UUID PRIMARY KEY,
   patient_id UUID NOT NULL,
+  title TEXT,
+  related_alert_id UUID,
   task_type TEXT NOT NULL,
   priority TEXT NOT NULL,
   status TEXT NOT NULL,
+  assigned_user_id TEXT,
+  assigned_user_name TEXT,
   due_at TIMESTAMPTZ,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS related_alert_id UUID;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_user_id TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_user_name TEXT;
 
 CREATE TABLE IF NOT EXISTS agent_appointment_holds (
   hold_id UUID PRIMARY KEY,
@@ -142,11 +155,16 @@ CREATE TABLE IF NOT EXISTS appointment_reminder_workflows (
   acknowledged_at TIMESTAMPTZ,
   acknowledged_via TEXT,
   auto_call_at TIMESTAMPTZ,
+  next_of_kin_called_at TIMESTAMPTZ,
   nurse_alerted_at TIMESTAMPTZ,
+  day_of_reminder_sent_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (appointment_id)
 );
+
+ALTER TABLE appointment_reminder_workflows ADD COLUMN IF NOT EXISTS next_of_kin_called_at TIMESTAMPTZ;
+ALTER TABLE appointment_reminder_workflows ADD COLUMN IF NOT EXISTS day_of_reminder_sent_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_reminder_workflows_status_next
   ON appointment_reminder_workflows (status, next_action_at);

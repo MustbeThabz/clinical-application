@@ -5,7 +5,7 @@ import { requireRole } from "@/lib/backend/auth"
 export const runtime = "nodejs"
 
 export async function GET(request: Request) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff"])
+  const auth = await requireRole(request, ["clinic_admin", "receptionist_admin", "nurse", "doctor"])
   if (!auth.ok) return auth.response
 
   const data = await getComplianceOverview()

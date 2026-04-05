@@ -5,7 +5,7 @@ import { getUserById } from "@/lib/backend/users"
 export const runtime = "nodejs"
 
 export async function GET(request: Request) {
-  const auth = requireAuth(request)
+  const auth = await requireAuth(request)
   if (!auth.ok) return auth.response
 
   const user = await getUserById(auth.context.userId)

@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
-import type { UserRole } from "@/lib/backend/auth"
+import type { UserRole } from "@/lib/roles"
 
 type ApiPatient = {
   id: string
@@ -29,6 +29,8 @@ type ApiPatient = {
   dateOfBirth: string
   conditionSummary: string
   callTriggerPhone?: string
+  nextOfKinName?: string
+  nextOfKinPhone?: string
   homeVisitAddress?: string
   homeLatitude?: string
   homeLongitude?: string
@@ -38,6 +40,16 @@ type ApiPatient = {
   nextAppointment?: string
   phone?: string
   email?: string
+}
+
+type TimelineItem = {
+  id: string
+  entityId: string
+  kind: "appointment" | "task" | "alert" | "workflow"
+  title: string
+  status: string
+  description?: string
+  occurredAt: string
 }
 
 function getStatusBadge(status: string) {
@@ -70,7 +82,23 @@ function getAge(dateOfBirth: string): number {
   return Math.max(age, 0)
 }
 
-export function PatientsView({ currentUserRole }: { currentUserRole: UserRole }) {
+export function PatientsView({
+  currentUserRole,
+  focusPatientId,
+  onOpenTasks,
+  onOpenWorkflow,
+  onOpenTask,
+  onOpenAppointment,
+  onOpenAlert,
+}: {
+  currentUserRole: UserRole
+  focusPatientId?: string | null
+  onOpenTasks: (patientId: string) => void
+  onOpenWorkflow: (patientId: string) => void
+  onOpenTask: (patientId: string, taskId: string) => void
+  onOpenAppointment: (appointmentId: string, date: string) => void
+  onOpenAlert: (alertId: string) => void
+}) {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [patients, setPatients] = useState<ApiPatient[]>([])
@@ -80,6 +108,9 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [selectedPatient, setSelectedPatient] = useState<ApiPatient | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [timelinePatientId, setTimelinePatientId] = useState<string | null>(null)
+  const [timeline, setTimeline] = useState<TimelineItem[]>([])
+  const [timelineLoading, setTimelineLoading] = useState(false)
   const [formState, setFormState] = useState({
     firstName: "",
     lastName: "",
@@ -87,6 +118,8 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
     sexAtBirth: "unknown",
     phone: "",
     callTriggerPhone: "",
+    nextOfKinName: "",
+    nextOfKinPhone: "",
     email: "",
     homeVisitAddress: "",
     homeLatitude: "",
@@ -105,7 +138,12 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
     enableReminderWorkflow: true,
   })
 
-  const canCreatePatient = currentUserRole === "clinic_admin" || currentUserRole === "clinical_staff"
+  const canCreatePatient = currentUserRole === "clinic_admin" || currentUserRole === "receptionist_admin"
+  const canSchedulePatient =
+    currentUserRole === "clinic_admin" ||
+    currentUserRole === "receptionist_admin" ||
+    currentUserRole === "nurse" ||
+    currentUserRole === "doctor"
 
   const readJson = async <T,>(response: Response): Promise<T | null> => {
     const raw = await response.text()
@@ -141,6 +179,30 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
     void loadPatients()
   }, [])
 
+  useEffect(() => {
+    if (!focusPatientId || loading) return
+    const target = document.getElementById(`patient-row-${focusPatientId}`)
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" })
+    }
+    setTimelinePatientId(focusPatientId)
+  }, [focusPatientId, loading, patients])
+
+  useEffect(() => {
+    if (!timelinePatientId) return
+    const loadTimeline = async () => {
+      setTimelineLoading(true)
+      try {
+        const response = await fetch(`/api/patients/${timelinePatientId}/timeline`, { cache: "no-store" })
+        const result = (await response.json()) as { data?: TimelineItem[] }
+        setTimeline((result.data ?? []) as TimelineItem[])
+      } finally {
+        setTimelineLoading(false)
+      }
+    }
+    void loadTimeline()
+  }, [timelinePatientId])
+
   const filteredPatients = useMemo(() => {
     return patients.filter((patient) => {
       const fullName = `${patient.firstName} ${patient.lastName}`
@@ -163,7 +225,7 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
     event.preventDefault()
     setError(null)
     if (!canCreatePatient) {
-      setError("Only clinic admin and clinical staff can create patients.")
+      setError("Only clinic admin or receptionist/admin staff can create patients.")
       return
     }
 
@@ -179,6 +241,8 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
           sexAtBirth: formState.sexAtBirth,
           phone: formState.phone.trim() || undefined,
           callTriggerPhone: formState.callTriggerPhone.trim() || undefined,
+          nextOfKinName: formState.nextOfKinName.trim() || undefined,
+          nextOfKinPhone: formState.nextOfKinPhone.trim() || undefined,
           email: formState.email.trim() || undefined,
           homeVisitAddress: formState.homeVisitAddress.trim() || undefined,
           homeLatitude: formState.homeLatitude.trim() || undefined,
@@ -203,6 +267,8 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
         sexAtBirth: "unknown",
         phone: "",
         callTriggerPhone: "",
+        nextOfKinName: "",
+        nextOfKinPhone: "",
         email: "",
         homeVisitAddress: "",
         homeLatitude: "",
@@ -375,6 +441,26 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
                     placeholder="+27 798220117"
                     value={formState.callTriggerPhone}
                     onChange={(e) => setFormState((prev) => ({ ...prev, callTriggerPhone: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="nextOfKinName">Next Of Kin Name</Label>
+                  <Input
+                    id="nextOfKinName"
+                    placeholder="Family contact name"
+                    value={formState.nextOfKinName}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, nextOfKinName: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="nextOfKinPhone">Next Of Kin Phone</Label>
+                  <Input
+                    id="nextOfKinPhone"
+                    placeholder="+27 798220118"
+                    value={formState.nextOfKinPhone}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, nextOfKinPhone: e.target.value }))}
                   />
                 </div>
               </div>
@@ -571,8 +657,14 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
               <TableBody>
                 {filteredPatients.map((patient) => {
                   const fullName = `${patient.firstName} ${patient.lastName}`
+                  const isFocused = focusPatientId === patient.id
                   return (
-                    <TableRow key={patient.id} className="cursor-pointer hover:bg-secondary/50">
+                    <TableRow
+                      key={patient.id}
+                      id={`patient-row-${patient.id}`}
+                      className={`cursor-pointer hover:bg-secondary/50 ${isFocused ? "bg-primary/5 ring-1 ring-primary/30" : ""}`}
+                      onClick={() => setTimelinePatientId(patient.id)}
+                    >
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="w-9 h-9">
@@ -581,7 +673,10 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
                             </AvatarFallback>
                           </Avatar>
                           <div>
-                            <p className="font-medium">{fullName}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium">{fullName}</p>
+                              {isFocused ? <Badge className="text-[10px] uppercase">From Task Queue</Badge> : null}
+                            </div>
                             <p className="text-xs text-muted-foreground">
                               {patient.mrn} | {getAge(patient.dateOfBirth)} yrs
                             </p>
@@ -618,9 +713,17 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
                               Send Message
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => openScheduleDialog(patient)}>
+                            <DropdownMenuItem disabled={!canSchedulePatient} onClick={() => openScheduleDialog(patient)}>
                               <Calendar className="w-4 h-4 mr-2" />
                               Schedule Appointment
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onOpenTasks(patient.id)}>
+                              <Pill className="w-4 h-4 mr-2" />
+                              Open Tasks
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setTimelinePatientId(patient.id)}>
+                              <Calendar className="w-4 h-4 mr-2" />
+                              View Timeline
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -633,6 +736,62 @@ export function PatientsView({ currentUserRole }: { currentUserRole: UserRole })
           )}
         </CardContent>
       </Card>
+
+      {timelinePatientId ? (
+        <Card className="border-0 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-lg">Patient Activity Timeline</CardTitle>
+            <CardDescription>
+              {patients.find((patient) => patient.id === timelinePatientId)
+                ? `Chronology for ${patients.find((patient) => patient.id === timelinePatientId)?.firstName} ${patients.find((patient) => patient.id === timelinePatientId)?.lastName}`
+                : "Chronological patient activity"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {timelineLoading ? <p className="text-sm text-muted-foreground">Loading timeline...</p> : null}
+            {!timelineLoading && timeline.length === 0 ? <p className="text-sm text-muted-foreground">No activity recorded yet.</p> : null}
+            {timeline.map((item) => (
+              <div key={item.id} className="rounded-lg border border-border bg-secondary/20 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px] uppercase">
+                        {item.kind}
+                      </Badge>
+                      <span className="font-medium text-sm">{item.title}</span>
+                      <Badge className="text-[10px] uppercase">{item.status}</Badge>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{item.description ?? "No additional detail."}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="text-xs text-muted-foreground">{new Date(item.occurredAt).toLocaleString()}</span>
+                    {item.kind === "workflow" ? (
+                      <Button size="sm" variant="outline" onClick={() => onOpenWorkflow(timelinePatientId)}>
+                        Open Workflow
+                      </Button>
+                    ) : null}
+                    {item.kind === "task" ? (
+                      <Button size="sm" variant="outline" onClick={() => onOpenTask(timelinePatientId, item.entityId)}>
+                        Open Task
+                      </Button>
+                    ) : null}
+                    {item.kind === "appointment" ? (
+                      <Button size="sm" variant="outline" onClick={() => onOpenAppointment(item.entityId, item.occurredAt.slice(0, 10))}>
+                        Open Appointment
+                      </Button>
+                    ) : null}
+                    {item.kind === "alert" ? (
+                      <Button size="sm" variant="outline" onClick={() => onOpenAlert(item.entityId)}>
+                        Open Alert
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Dialog open={scheduleOpen} onOpenChange={setScheduleOpen}>
         <DialogContent>

@@ -10,6 +10,12 @@ from .config import settings
 client = Redis.from_url(settings.redis_url, decode_responses=True)
 
 
+def _session_key(phone: str) -> str:
+    digits = "".join(ch for ch in str(phone) if ch.isdigit())
+    normalized = digits or str(phone).strip()
+    return f"wa:session:{normalized}"
+
+
 def seen_message(message_id: str | None) -> bool:
     if not message_id:
         return False
@@ -19,15 +25,15 @@ def seen_message(message_id: str | None) -> bool:
 
 
 def set_session(phone: str, payload: dict, ttl_seconds: int = 3600) -> None:
-    client.setex(f"wa:session:{phone}", ttl_seconds, json.dumps(payload))
+    client.setex(_session_key(phone), ttl_seconds, json.dumps(payload))
 
 
 def get_session(phone: str) -> dict | None:
-    raw = client.get(f"wa:session:{phone}")
+    raw = client.get(_session_key(phone))
     if not raw:
         return None
     return json.loads(raw)
 
 
 def clear_session(phone: str) -> None:
-    client.delete(f"wa:session:{phone}")
+    client.delete(_session_key(phone))

@@ -10,7 +10,15 @@ type Context = {
 }
 
 export async function GET(request: Request, context: Context) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff", "lab_pharmacy"])
+  const auth = await requireRole(request, [
+    "clinic_admin",
+    "receptionist_admin",
+    "research_assistant",
+    "nurse",
+    "doctor",
+    "lab_personnel",
+    "pharmacist",
+  ])
   if (!auth.ok) return auth.response
 
   const { id } = await context.params
@@ -24,7 +32,7 @@ export async function GET(request: Request, context: Context) {
 }
 
 export async function PATCH(request: Request, context: Context) {
-  const auth = requireRole(request, ["clinic_admin", "clinical_staff"])
+  const auth = await requireRole(request, ["clinic_admin", "receptionist_admin", "nurse", "doctor"])
   if (!auth.ok) return auth.response
 
   const { id } = await context.params

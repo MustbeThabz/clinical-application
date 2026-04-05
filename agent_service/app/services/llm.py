@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-from app.config import settings
-
 
 def classify_patient_intent(message: str) -> str:
     normalized = message.strip().lower()
@@ -13,19 +9,10 @@ def classify_patient_intent(message: str) -> str:
         return "change"
     if normalized in {"book", "appointment", "schedule"}:
         return "book"
-
-    if not settings.gemini_api_key:
-        return "unknown"
-
-    model = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=settings.gemini_api_key, temperature=0)
-    prompt = (
-        "Classify this patient WhatsApp message into one label: "
-        "confirm, change, book, unknown. Return only one word. Message: "
-        f"{message}"
-    )
-
-    response = model.invoke(prompt)
-    value = str(response.content).strip().lower()
-    if value in {"confirm", "change", "book"}:
-        return value
+    if "reschedule" in normalized or "different appointment time" in normalized:
+        return "change"
+    if "book appointment" in normalized or "request an available appointment slot" in normalized:
+        return "book"
+    if "view appointment" in normalized or "next appointment" in normalized:
+        return "confirm"
     return "unknown"
